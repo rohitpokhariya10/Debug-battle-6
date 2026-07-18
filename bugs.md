@@ -11,6 +11,19 @@
 | Preset challenge defects | 19 |
 | Additional runtime defects discovered | 11 |
 
+## Table of Contents
+
+1. [Executive Summary](#executive-summary)
+2. [Complete Defect Register](#complete-defect-register)
+3. [Preset Server Bugs](#preset-server-bugs--detailed-fixes)
+4. [Preset Client and Configuration Bugs](#preset-client-and-configuration-bugs--detailed-fixes)
+5. [Additional Runtime Bugs](#additional-runtime-bugs-discovered-during-full-system-debugging)
+6. [Resolution Summary](#resolution-summary)
+7. [Verification and Test Evidence](#verification-and-test-evidence)
+8. [Runtime Configuration](#runtime-configuration)
+9. [Security Note](#security-note)
+10. [Final Outcome](#final-outcome)
+
 ## Executive Summary
 
 The application contained defects across authentication, database configuration, signup state, friendship presence, invitations, scorekeeping, turn management, Socket.IO synchronization, and UI layering. Several defects completely blocked core flows; others produced incorrect UI state, duplicate requests, stale game state, or accounts permanently marked as playing.
@@ -60,7 +73,7 @@ All fixes were limited to debugging the existing behavior. No product feature, r
 
 ---
 
-## Server Bugs — Detailed Fixes
+## Preset Server Bugs — Detailed Fixes
 
 ### BUG 1 — `verifyAccessToken` typo in env key
 
@@ -175,7 +188,7 @@ All fixes were limited to debugging the existing behavior. No product feature, r
 
 ---
 
-## Client Bugs — Detailed Fixes
+## Preset Client and Configuration Bugs — Detailed Fixes
 
 ### BUG 9 — `clearCredentials` removes wrong localStorage key
 
@@ -332,8 +345,305 @@ All fixes were limited to debugging the existing behavior. No product feature, r
 
 ---
 
-## Counts
+## Additional Runtime Bugs Discovered During Full-System Debugging
 
-- **9 Critical** bugs fixed (all server auth/game-logic bugs + form data wipe + DB connection + title overlap)
-- **9 Medium** bugs fixed (UI display/state issues)
-- **19 total** bugs found and resolved
+The preset list covered 19 deliberately planted defects. Building and exercising the complete application exposed the following 11 additional runtime defects.
+
+### BUG 20 — Authoritative online match updates were never applied
+
+- **Severity:** Critical
+- **File:** `client/src/features/game/providers/GameProvider.jsx` — `onMatchUpdate`
+- **Observed behavior:** A player mainly saw their own optimistic move. Opponent moves, updated scores, round winners, winning lines, and server-triggered board resets did not reliably appear.
+- **Root cause:** The `match-update` listener handled countdown UI but never stored `updatedMatch` in React state.
+- **Resolution:** Commit every server-authoritative update before processing countdown state.
+
+```diff
+ onMatchUpdate: (updatedMatch) => {
++  setMatch(updatedMatch);
+
+   if (!updatedMatch.roundWinner) {
+```
+
+- **Why this is correct:** The server remains the source of truth. Optimistic state is temporary and is replaced by the next authoritative socket payload.
+
+---
+
+### BUG 21 — Server did not enforce whose turn it was
+
+- **Severity:** Critical
+- **File:** `server/src/services/game/GameManager.js` — `makeMove`
+- **Observed behavior:** A modified client could send moves for both sides or move repeatedly without waiting for the opponent.
+- **Root cause:** `isPlayerX` and `isPlayerO` were calculated but never used. Client-side disabled buttons were the only turn restriction and could be bypassed through raw socket events.
+- **Resolution:** Reject a move unless the authenticated player owns the mark for the current turn.
+
+```js
+if ((game.isXTurn && !isPlayerX) || (!game.isXTurn && !isPlayerO)) {
+  return null;
+}
+```
+
+- **Why this is correct:** Multiplayer rules are now enforced by the trusted server rather than depending on client behavior.
+
+---
+
+### BUG 22 — Server accepted malformed board indexes
+
+- **Severity:** High
+- **File:** `server/src/services/game/GameManager.js` — `makeMove`
+- **Observed behavior:** Values such as `-1`, `9`, fractional numbers, strings, `NaN`, or `Infinity` could create invalid array properties, expand the board, consume a turn without a visible mark, or corrupt synchronized state.
+- **Root cause:** `cellIndex` was used directly without type or range validation.
+- **Resolution:** Require an integer within the actual board bounds before reading or mutating the board.
+
+```js
+if (!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex >= game.board.length) {
+  return null;
+}
+```
+
+---
+
+### BUG 23 — Previous winning line remained in the next online round
+
+- **Severity:** Medium
+- **File:** `server/src/services/game/GameManager.js` — `resetRound`
+- **Observed behavior:** The new blank board could still display the previous round's strike-through line.
+- **Root cause:** Round reset cleared `board` and `roundWinner` but did not clear `winCombo`.
+- **Resolution:** Reset all round-scoped winner state.
+
+```diff
+ game.board = Array(9).fill(null);
+ game.roundWinner = null;
++game.winCombo = null;
+```
+
+---
+
+### BUG 24 — A 2–0 in-person result incorrectly required a third round
+
+- **Severity:** Medium
+- **File:** `client/src/features/game/components/InPersonGame.jsx` — `gameReducer`
+- **Observed behavior:** A player who won the first two rounds still had to play a meaningless third round.
+- **Root cause:** Match completion required both two wins and `newRoundsPlayed >= 3`.
+- **Resolution:** End immediately when either player reaches the existing first-to-two target. Draws can still extend the match naturally.
+
+```diff
+-if (newRoundsPlayed >= 3 && (newScores.X >= 2 || newScores.O >= 2)) {
++if (newScores.X >= 2 || newScores.O >= 2) {
+```
+
+---
+
+### BUG 25 — Aborted matches left persisted users stuck as `playing`
+
+- **Severity:** High
+- **File:** `server/src/services/game/GameManager.js` — `abortGame`
+- **Observed behavior:** After socket abandonment or expiry of the disconnect grace period, users could remain unavailable for future invitations and matches.
+- **Root cause:** `abortGame` reset only the in-memory `PlayerManager`; the MongoDB `User.activity` values remained `playing`.
+- **Resolution:** Reset both participants in persistent storage as part of abort cleanup.
+
+```js
+await User.updateMany(
+  { _id: { $in: [game.playerX._id, game.playerO._id] } },
+  { activity: 'idle' }
+);
+```
+
+- **Failure handling:** Database reset errors are logged without preventing the remaining room and history cleanup from proceeding.
+
+---
+
+### BUG 26 — One Abandon click launched competing leave operations
+
+- **Severity:** High
+- **File:** `client/src/features/game/providers/GameProvider.jsx` — `leaveMatch`
+- **Observed behavior:** A single click could trigger one Socket.IO abort, two REST leave requests, repeated cleanup, and duplicate success handling.
+- **Root cause:** `leaveMatch` emitted `leave-match`, called `gameApi.leave()`, and then called `onGameExit()`. The parent implementation of `onGameExit()` also called `gameApi.leave()`.
+- **Resolution:** Establish one canonical owner for leaving: the provider now delegates once to `onGameExit()`.
+
+```diff
+-connectionManager.emit('leave-match');
+-await gameApi.leave();
+-toast.success('Left match successfully');
+-onGameExit();
++await onGameExit();
+```
+
+- **Why this is correct:** The parent handler owns the API request, Redux activity update, active-room cleanup, and success toast as one coherent transaction.
+
+---
+
+### BUG 27 — One `opponent-left` event invoked exit twice
+
+- **Severity:** Medium
+- **Files:**
+  - `client/src/features/game/providers/GameProvider.jsx`
+  - `client/src/features/game/socket/events/room.events.js`
+- **Observed behavior:** Opponent abandonment launched duplicate REST leave requests and repeated local state updates.
+- **Root cause:** `GameProvider` supplied the same exit behavior as both `onOpponentLeft` and `onGameExit`, while the event adapter called both callbacks.
+- **Resolution:** Simplify the adapter to a single callback contract.
+
+```diff
+-export const registerRoomEvents = (manager, { onOpponentLeft, onGameExit }) => {
++export const registerRoomEvents = (manager, { onOpponentLeft }) => {
+   // ...
+   onOpponentLeft?.();
+-  onGameExit?.();
+ };
+```
+
+---
+
+### BUG 28 — Client retained a stale active room after leaving
+
+- **Severity:** Medium
+- **File:** `client/src/features/game/components/GameHeader.jsx` — `handleLeaveGame`
+- **Observed behavior:** A later socket reconnect could attempt to rejoin an old completed or deleted room, causing false recovery errors.
+- **Root cause:** Successful leave updated the API and Redux user state but did not clear `ConnectionManager.activeRoomId`.
+- **Resolution:** Clear the room reference immediately after the server confirms the leave.
+
+```diff
+ await gameApi.leave();
++ConnectionManager.setActiveRoom(null);
+ dispatch(updateUser({ activity: 'idle' }));
+```
+
+---
+
+### BUG 29 — Reconnecting player received their own reconnect notification
+
+- **Severity:** Medium
+- **Files:**
+  - `server/src/services/game/EventRegistry.js`
+  - `server/src/services/game/StateSynchronizer.js`
+- **Observed behavior:** The reconnecting user could see “Opponent reconnected!” even though their own socket had reconnected.
+- **Root cause:** After joining the room, `player-reconnected` was broadcast to every room member, including the new socket.
+- **Resolution:** Add an optional excluded socket ID and send the event to the room except the reconnecting socket.
+
+```js
+let target = this.io.to(`match:${roomId}`);
+if (excludedSocketId) target = target.except(excludedSocketId);
+target.emit('player-reconnected', { userId });
+```
+
+---
+
+### BUG 30 — Leaving player received their own opponent-left notification
+
+- **Severity:** Medium
+- **Files:**
+  - `server/src/services/game/EventRegistry.js`
+  - `server/src/services/game/StateSynchronizer.js`
+  - `server/src/services/gameInvite.service.js`
+- **Observed behavior:** The leaving user could receive “Opponent left,” re-enter exit handling, show a false toast, and amplify the duplicate-leave race.
+- **Root cause:** Both explicit socket abandonment and REST leave broadcast `opponent-left` to every socket in the room.
+- **Resolution:** Pass the leaving user's socket ID to `sendOpponentLeft` and exclude it from the broadcast. Only the remaining opponent is notified.
+
+```js
+StateSynchronizer.sendOpponentLeft(
+  activeRoom.roomId,
+  'Opponent has left the game',
+  leavingSocketId
+);
+```
+
+## Resolution Summary
+
+| Severity | Preset | Additional | Total |
+|---|---:|---:|---:|
+| Critical | 10 | 2 | 12 |
+| High | 0 | 3 | 3 |
+| Medium | 9 | 6 | 15 |
+| **Total** | **19** | **11** | **30** |
+
+## Verification and Test Evidence
+
+### 1. Dependency and build verification
+
+- Installed locked client and server dependencies with `npm ci`.
+- Client dependency audit completed with zero reported vulnerabilities during installation.
+- Ran the Vite production build successfully:
+  - 2,175 modules transformed.
+  - HTML, CSS, and JavaScript assets generated successfully.
+  - The existing bundle-size advisory is non-blocking and does not affect correctness.
+
+### 2. Server static verification
+
+- Executed `node --check` against every server JavaScript file.
+- Result: all server files passed syntax validation.
+- Executed `git diff --check`.
+- Result: no whitespace errors were detected.
+
+### 3. Focused behavioral assertions
+
+The game engine was exercised directly with assertions for:
+
+- Wrong player rejected on X's turn.
+- Negative and out-of-range cells rejected.
+- Valid X move accepted and turn changed to O.
+- Repeated X move rejected during O's turn.
+- Valid O move accepted.
+- O victory credited to O, not X.
+- Round reset cleared `winCombo`.
+- First-to-two match returned the correct final winner.
+- Abort cleanup reset both participant IDs.
+
+The authentication service was exercised directly for:
+
+- Free username signup succeeds.
+- Taken username produces `409 Conflict`.
+- Correct password login succeeds.
+- Incorrect password produces `401 Unauthorized`.
+
+### 4. End-to-end API verification
+
+The repaired server was launched against a disposable local MongoDB instance and tested over HTTP.
+
+| Flow | Expected | Result |
+|---|---:|---:|
+| `GET /health` | 200 | Passed |
+| New account signup | 201 | Passed |
+| Duplicate signup | 409 | Passed |
+| Wrong-password login | 401 | Passed |
+| Authenticated `GET /api/auth/me` | 200 | Passed |
+| Presence heartbeat | 200 | Passed |
+| Create game invite | 201 | Passed |
+| Reject pending invite | 200 | Passed |
+| Create and accept friendship | 200 | Passed |
+| Online friend status | `online: true` | Passed |
+
+The temporary API and MongoDB processes were shut down cleanly after verification.
+
+## Runtime Configuration
+
+The server now reads configuration from the environment. Copy the safe template and replace the placeholder secret:
+
+```bash
+cd server
+cp .env.example .env
+# Set JWT_ACCESS_SECRET to a long random value.
+npm start
+```
+
+Start the client separately:
+
+```bash
+cd client
+npm run dev
+```
+
+Required server configuration is documented in `server/.env.example`:
+
+- `MONGODB_URI`
+- `JWT_ACCESS_SECRET`
+- `JWT_ACCESS_EXPIRES_IN`
+- `CLIENT_ORIGIN`
+- `PORT`
+- `NODE_ENV`
+
+## Security Note
+
+Because a database credential had previously been embedded in source code, that credential should be rotated if it was ever active, and repository history should be reviewed before publishing or sharing the project. The repaired source no longer contains or depends on that remote connection string.
+
+## Final Outcome
+
+All 30 documented defects are resolved. Authentication, signup, logout, friend presence, invitation handling, in-person gameplay, online turn enforcement, scorekeeping, round reset, leave/disconnect cleanup, Socket.IO synchronization, and database configuration now behave consistently with the application's original design.
