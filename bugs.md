@@ -1,28 +1,62 @@
-# Debug Battle 6 — All Bugs Solved
+# Debug Battle 6 — Complete Debugging and Resolution Report
 
-## Summary
+## Document Control
 
-| # | File | Line | Severity | Description |
-|---|------|------|----------|-------------|
-| 1 | `server/src/utils/jwt.js` | L22 | Critical | `JWT_ACCES_SECRET` typo — all token verification fails |
-| 2 | `server/src/services/auth.service.js` | L17 | Critical | Signup username-exists check inverted |
-| 3 | `server/src/services/auth.service.js` | L40 | Critical | Login password-validity check inverted |
-| 4 | `server/src/services/gameInvite.service.js` | L40 | Critical | Unconditional throw — all invites blocked |
-| 5 | `server/src/services/gameInvite.service.js` | L64 | Critical | Wrong status check — invite responses always 404 |
-| 6 | `server/src/services/friendship.service.js` | L108 | Medium | Online status hardcoded `false` |
-| 7 | `server/src/services/game/GameManager.js` | L98 | Critical | Only X score increments; O wins ignored |
-| 8 | `server/src/services/game/GameManager.js` | L134 | Critical | `isXTurn` never toggled — turns never alternate |
-| 9 | `client/src/store/authSlice.js` | L51 | Medium | Wrong localStorage key removed on logout |
-| 10 | `client/src/pages/LandingPage.jsx` | L12 | Medium | Navigates to `/auth/signup` instead of `/signup` |
-| 11 | `client/src/features/auth/hooks/useSignup.js` | L75 | Critical | `selectAvatar` wipes all form data |
-| 12 | `client/src/features/game/components/OnlineGame.jsx` | L203-204 | Medium | X/O score props swapped in `ScorePanel` |
-| 13 | `client/src/features/game/components/OnlineGame.jsx` | L234 | Medium | Final winner label `!==` instead of `===` |
-| 14 | `client/src/features/game/providers/GameProvider.jsx` | L57 | Medium | Optimistic update places wrong mark (`O` when `X`'s turn) |
-| 15 | `client/src/features/game/providers/GameProvider.jsx` | L61 | Medium | Optimistic update doesn't toggle `isXTurn` |
-| 16 | `server/src/config/db.js` | L14-15 | Critical | Hardcoded MongoDB URI ignoring `.env` |
-| 17 | `client/src/features/game/components/GameHeader.jsx` | L436-453 | Medium | Invite toast Accept/Decline buttons swapped |
-| 18 | `client/src/features/game/components/GameHeader.jsx` | L52-56 | Medium | Online indicator colors inverted |
-| 19 | `client/src/features/game/components/GameHero.jsx` | L359 | Critical | "TIC TAC TOE" title overlaps buttons, blocks clicks |
+| Field | Value |
+|---|---|
+| Project | Debug Battle 6 — Tic Tac Toe |
+| Scope | React/Vite client, Express/Mongoose API, Socket.IO multiplayer engine |
+| Status | Resolved and verified |
+| Total defects | 30 |
+| Preset challenge defects | 19 |
+| Additional runtime defects discovered | 11 |
+
+## Executive Summary
+
+The application contained defects across authentication, database configuration, signup state, friendship presence, invitations, scorekeeping, turn management, Socket.IO synchronization, and UI layering. Several defects completely blocked core flows; others produced incorrect UI state, duplicate requests, stale game state, or accounts permanently marked as playing.
+
+All fixes were limited to debugging the existing behavior. No product feature, route structure, visual concept, or application context was changed. The server remains authoritative for multiplayer state, while the client retains its existing optimistic-update design.
+
+### Severity Definitions
+
+- **Critical:** Blocks a core user journey, breaks authorization/game integrity, or prevents the application from operating correctly.
+- **High:** Causes serious state corruption, race conditions, invalid server state, or persistent user impact.
+- **Medium:** Produces incorrect UI/UX, duplicate processing, stale state, or behavior that is recoverable without data loss.
+
+## Complete Defect Register
+
+| # | Area / File | Severity | Defect | Resolution |
+|---|---|---|---|---|
+| 1 | `server/src/utils/jwt.js` | Critical | Access-token verification used the misspelled secret key | Use `JWT_ACCESS_SECRET` consistently |
+| 2 | `server/src/services/auth.service.js` | Critical | Signup username-existence condition was inverted | Reject only when the username already exists |
+| 3 | `server/src/services/auth.service.js` | Critical | Login password-validity condition was inverted | Reject only invalid passwords |
+| 4 | `server/src/services/gameInvite.service.js` | Critical | Invite flow always threw an offline error | Throw only when the receiver is offline |
+| 5 | `server/src/services/gameInvite.service.js` | Critical | Pending invites were treated as inactive | Accept responses only for `pending` invites |
+| 6 | `server/src/services/friendship.service.js` | Medium | Friend online state was hardcoded to `false` | Return the calculated heartbeat status |
+| 7 | `server/src/services/game/GameManager.js` | Critical | O wins incremented X's score | Increment the actual winner's score |
+| 8 | `server/src/services/game/GameManager.js` | Critical | Turns never alternated | Toggle `isXTurn` after non-terminal moves |
+| 9 | `client/src/store/authSlice.js` | Medium | Logout removed the wrong storage key | Remove `accessToken` |
+| 10 | `client/src/pages/LandingPage.jsx` | Medium | Start button navigated to a nonexistent route | Navigate to `/signup` |
+| 11 | `client/src/features/auth/hooks/useSignup.js` | Critical | Avatar selection erased prior signup fields | Merge avatar into accumulated form state |
+| 12 | `client/src/features/game/components/OnlineGame.jsx` | Medium | X and O score values were swapped | Bind each score to its matching mark |
+| 13 | `client/src/features/game/components/OnlineGame.jsx` | Medium | Final winner label identified the loser as "YOU" | Use equality when comparing winner and current user |
+| 14 | `client/src/features/game/providers/GameProvider.jsx` | Medium | Optimistic move rendered the opposite mark | Render the mark for the current turn |
+| 15 | `client/src/features/game/providers/GameProvider.jsx` | Medium | Optimistic state did not advance the turn | Toggle optimistic `isXTurn` |
+| 16 | `server/src/config/db.js` | Critical | Database connector ignored configuration and exposed a hardcoded URI | Connect using validated `env.MONGODB_URI` |
+| 17 | `client/src/features/game/components/GameHeader.jsx` | Medium | Invite Accept/Decline actions were reversed | Map labels to the correct actions |
+| 18 | `client/src/features/game/components/GameHeader.jsx` | Medium | Online/offline indicator colors were reversed | Green for online; muted for offline |
+| 19 | `client/src/features/game/components/GameHero.jsx` | Critical | Decorative title intercepted clicks on game-mode buttons | Disable title pointer events and raise content stacking |
+| 20 | `client/src/features/game/providers/GameProvider.jsx` | Critical | Socket match updates were never committed to React state | Call `setMatch(updatedMatch)` for every authoritative update |
+| 21 | `server/src/services/game/GameManager.js` | Critical | Server accepted moves from the wrong player | Enforce X/O ownership against `isXTurn` |
+| 22 | `server/src/services/game/GameManager.js` | High | Malformed/out-of-range cell indexes could mutate invalid board positions | Validate integer index range before mutation |
+| 23 | `server/src/services/game/GameManager.js` | Medium | Previous round's winning line remained after reset | Clear `winCombo` during `resetRound` |
+| 24 | `client/src/features/game/components/InPersonGame.jsx` | Medium | First-to-two match still required three completed rounds | Finish immediately when either player reaches two wins |
+| 25 | `server/src/services/game/GameManager.js` | High | Aborted matches left database users stuck as `playing` | Reset both users to `idle` in MongoDB |
+| 26 | `client/src/features/game/providers/GameProvider.jsx` | High | Leaving triggered Socket.IO, HTTP, and callback leave paths | Use one parent-owned exit path |
+| 27 | `client/src/features/game/socket/events/room.events.js` | Medium | Opponent-left handling invoked exit twice | Retain a single callback contract |
+| 28 | `client/src/features/game/components/GameHeader.jsx` | Medium | Client retained a stale active room after leaving | Clear the active room after successful exit |
+| 29 | Socket synchronization services | Medium | Reconnect notification was echoed to the reconnecting player | Exclude the reconnecting socket |
+| 30 | Socket synchronization services | Medium | Leave notification was echoed to the leaving player | Exclude the leaving socket |
 
 ---
 
@@ -44,7 +78,7 @@
 ### BUG 2 — `signup` inverts the username-exists check
 
 - **File:** `server/src/services/auth.service.js:17`
-- **Problem:** `if (!exists)` throws when `exists` is falsy (username is free). This blocks new registrations while allowing duplicate usernames.
+- **Problem:** `if (!exists)` throws when `exists` is falsy (the username is free). This blocks valid registrations and bypasses the intended friendly `409 Conflict` path for taken usernames. MongoDB's unique index still prevents a duplicate record, but the service could fall through to a database duplicate-key error instead of handling it correctly.
 - **Fix:** Removed the `!` so it throws only when `exists` is truthy (username is taken).
 
 ```diff
@@ -88,8 +122,8 @@
 
 ### BUG 5 — `respondToInvite` checks wrong status
 
-- **File:** `server/src/services/gameInvite.service.js:64`
-- **Problem:** Newly created invites have `status: 'pending'`. Checking `invite.status !== 'accepted'` is always true for pending invites, so every response throws 404.
+- **File:** `server/src/services/gameInvite.service.js` — `respondToInvite`
+- **Problem:** Newly created invites have `status: 'pending'`. Checking `invite.status !== 'accepted'` rejected every valid response to a pending invite with `404 Not Found`.
 - **Fix:** Changed `'accepted'` to `'pending'`.
 
 ```diff
@@ -116,8 +150,8 @@
 
 ### BUG 7 — `makeMove` only increments X score
 
-- **File:** `server/src/services/game/GameManager.js:98`
-- **Problem:** `game.scores.X += 1` runs regardless of who won. When O wins, the score goes to X's tally.
+- **File:** `server/src/services/game/GameManager.js` — `makeMove`
+- **Problem:** `game.scores.X += 1` ran regardless of who won. An O victory was incorrectly credited to X.
 - **Fix:** Use the actual winner mark as the key.
 
 ```diff
@@ -129,7 +163,7 @@
 
 ### BUG 8 — `makeMove` never toggles `isXTurn`
 
-- **File:** `server/src/services/game/GameManager.js:134`
+- **File:** `server/src/services/game/GameManager.js` — `makeMove`
 - **Problem:** After a move that doesn't end the round, the `else` block is empty — `isXTurn` is never toggled. The same player keeps making all moves.
 - **Fix:** Toggle `isXTurn` in the else block.
 
@@ -159,7 +193,7 @@
 ### BUG 10 — `LandingPage` navigates to wrong route
 
 - **File:** `client/src/pages/LandingPage.jsx:12`
-- **Problem:** `navigate('/auth/signup')` but the actual route is `/signup`. The wildcard catch-all redirects back to `/`, causing an infinite loop on the main entry point.
+- **Problem:** `navigate('/auth/signup')` targeted a route that does not exist. The wildcard route redirected back to `/`, so clicking Start appeared to bounce back to the landing page instead of opening signup.
 - **Fix:** Changed to `navigate('/signup')`.
 
 ```diff
@@ -238,13 +272,13 @@
 
 ### BUG 16 — DB connection hardcoded URI ignoring `.env`
 
-- **File:** `server/src/config/db.js:14-15`
-- **Problem:** The MongoDB URI was hardcoded to a completely different Atlas cluster (`cluster0.qyfub1p` / `tictactoe`) instead of using `env.MONGODB_URI` from `.env` (`cluster0.orxdubk` / `xogame`). Your `.env` was loaded but never used at connection time.
-- **Fix:** Replaced hardcoded URI with `env.MONGODB_URI`.
+- **File:** `server/src/config/db.js` — `connectDB`
+- **Problem:** The database module contained an embedded remote connection string and ignored the already validated `env.MONGODB_URI`. This made deployments connect to the wrong database, exposed credentials in source, and made environment-specific configuration ineffective.
+- **Fix:** Removed the embedded URI and passed `env.MONGODB_URI` directly to Mongoose. A safe `server/.env.example` was also added so required settings are explicit without committing secrets.
 
 ```diff
-- const uri = "mongodb+srv://...cluster0.qyfub1p.mongodb.net/tictactoe";
-+ const uri = env.MONGODB_URI;
+- const conn = await mongoose.connect(hardcodedUri);
++ const conn = await mongoose.connect(env.MONGODB_URI);
 ```
 
 ---
