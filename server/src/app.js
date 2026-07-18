@@ -17,7 +17,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendBuildPath = path.resolve(__dirname, '../public');
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        imgSrc: ["'self'", 'data:', 'https://api.dicebear.com'],
+      },
+    },
+  }),
+);
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

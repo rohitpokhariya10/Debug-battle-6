@@ -7,9 +7,9 @@
 | Project | Debug Battle 6 — Tic Tac Toe |
 | Scope | React/Vite client, Express/Mongoose API, Socket.IO multiplayer engine |
 | Status | Resolved and verified |
-| Total defects | 30 |
+| Total defects | 31 |
 | Preset challenge defects | 19 |
-| Additional runtime defects discovered | 11 |
+| Additional runtime defects discovered | 12 |
 
 ## Table of Contents
 
@@ -70,6 +70,7 @@ All fixes were limited to debugging the existing behavior. No product feature, r
 | 28 | `client/src/features/game/components/GameHeader.jsx` | Medium | Client retained a stale active room after leaving | Clear the active room after successful exit |
 | 29 | Socket synchronization services | Medium | Reconnect notification was echoed to the reconnecting player | Exclude the reconnecting socket |
 | 30 | Socket synchronization services | Medium | Leave notification was echoed to the leaving player | Exclude the leaving socket |
+| 31 | `server/src/app.js` | Medium | Helmet CSP blocked all externally generated DiceBear avatars | Allow only the required DiceBear image origin |
 
 ---
 
@@ -347,7 +348,7 @@ All fixes were limited to debugging the existing behavior. No product feature, r
 
 ## Additional Runtime Bugs Discovered During Full-System Debugging
 
-The preset list covered 19 deliberately planted defects. Building and exercising the complete application exposed the following 11 additional runtime defects.
+The preset list covered 19 deliberately planted defects. Building, deploying, and exercising the complete application exposed the following 12 additional runtime defects.
 
 ### BUG 20 — Authoritative online match updates were never applied
 
@@ -546,14 +547,38 @@ StateSynchronizer.sendOpponentLeft(
 );
 ```
 
+---
+
+### BUG 31 — Production Content Security Policy blocked avatar images
+
+- **Severity:** Medium
+- **File:** `server/src/app.js` — Helmet configuration
+- **Observed behavior:** The avatar selection grid rendered broken-image icons even though every DiceBear URL was valid and selectable.
+- **Root cause:** Helmet's default Content Security Policy emitted `img-src 'self' data:`. All generated avatars use `https://api.dicebear.com`, so production browsers correctly blocked them.
+- **Resolution:** Keep Helmet and its default protections enabled while narrowly adding the required DiceBear image origin.
+
+```js
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        imgSrc: ["'self'", 'data:', 'https://api.dicebear.com'],
+      },
+    },
+  }),
+);
+```
+
+- **Why this is correct:** The fix does not disable CSP or permit arbitrary HTTPS images. It authorizes only the application's existing avatar provider.
+
 ## Resolution Summary
 
 | Severity | Preset | Additional | Total |
 |---|---:|---:|---:|
 | Critical | 10 | 2 | 12 |
 | High | 0 | 3 | 3 |
-| Medium | 9 | 6 | 15 |
-| **Total** | **19** | **11** | **30** |
+| Medium | 9 | 7 | 16 |
+| **Total** | **19** | **12** | **31** |
 
 ## Verification and Test Evidence
 
@@ -572,6 +597,8 @@ StateSynchronizer.sendOpponentLeft(
 - Result: all server files passed syntax validation.
 - Executed `git diff --check`.
 - Result: no whitespace errors were detected.
+- Verified the production root response returns `200` and its CSP explicitly permits `https://api.dicebear.com` under `img-src`.
+- Verified the DiceBear SVG endpoint independently returns `200 image/svg+xml`.
 
 ### 3. Focused behavioral assertions
 
@@ -646,4 +673,4 @@ Because a database credential had previously been embedded in source code, that 
 
 ## Final Outcome
 
-All 30 documented defects are resolved. Authentication, signup, logout, friend presence, invitation handling, in-person gameplay, online turn enforcement, scorekeeping, round reset, leave/disconnect cleanup, Socket.IO synchronization, and database configuration now behave consistently with the application's original design.
+All 31 documented defects are resolved. Authentication, signup, avatar rendering, logout, friend presence, invitation handling, in-person gameplay, online turn enforcement, scorekeeping, round reset, leave/disconnect cleanup, Socket.IO synchronization, and database configuration now behave consistently with the application's original design.
