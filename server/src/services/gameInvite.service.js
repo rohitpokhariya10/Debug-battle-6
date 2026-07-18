@@ -151,7 +151,12 @@ const gameInviteService = {
       const wasActive = activeRoom.status === 'active';
       if (wasActive) {
         await GameManager.abortGame(activeRoom.roomId);
-        StateSynchronizer.sendOpponentLeft(activeRoom.roomId, 'Opponent has left the game');
+        const leavingSocketId = ConnectionManager.getSocketId(userId);
+        StateSynchronizer.sendOpponentLeft(
+          activeRoom.roomId,
+          'Opponent has left the game',
+          leavingSocketId
+        );
 
         // Reset the other player in DB only if it was an active match abandonment
         const opponentId = activeRoom.players.find(p => p.toString() !== userId.toString());

@@ -71,11 +71,21 @@ class GameManager {
     const game = this.games.get(roomId);
     if (!game || game.status !== 'active') return null;
 
-    // Verify cell is empty and no round winner is set
+    // Reject malformed moves before reading or mutating the board.
+    if (!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex >= game.board.length) {
+      return null;
+    }
+
+    // Verify cell is empty and no round winner is set.
     if (game.board[cellIndex] || game.roundWinner) return null;
 
     const isPlayerX = game.playerX._id.toString() === userId.toString();
     const isPlayerO = game.playerO._id.toString() === userId.toString();
+
+    // The server is authoritative: only the player whose turn it is may move.
+    if ((game.isXTurn && !isPlayerX) || (!game.isXTurn && !isPlayerO)) {
+      return null;
+    }
 
     // Apply mark
     const mark = game.isXTurn ? 'X' : 'O';
@@ -147,6 +157,7 @@ class GameManager {
 
     game.board = Array(9).fill(null);
     game.roundWinner = null;
+    game.winCombo = null;
     game.isXTurn = startingMark === 'X';
 
     return game;
@@ -163,6 +174,16 @@ class GameManager {
       // Reset statuses to idle
       PlayerManager.setPlayerStatus(game.playerX._id, 'idle');
       PlayerManager.setPlayerStatus(game.playerO._id, 'idle');
+
+      // A disconnect/abandonment must not leave either account stuck as playing.
+      try {
+        await User.updateMany(
+          { _id: { $in: [game.playerX._id, game.playerO._id] } },
+          { activity: 'idle' }
+        );
+      } catch (e) {
+        console.error('Failed to reset player activity after aborted match', e);
+      }
       
       // Complete room
       RoomManager.completeRoom(roomId);

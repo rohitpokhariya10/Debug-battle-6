@@ -74,16 +74,13 @@ export const GameProvider = ({ children, onGameExit }) => {
   const leaveMatch = useCallback(async () => {
     setLeaving(true);
     try {
-      connectionManager.emit('leave-match');
-      await gameApi.leave();
-      toast.success('Left match successfully');
-      onGameExit();
+      await onGameExit();
     } catch (e) {
       toast.error('Failed to leave match session');
     } finally {
       setLeaving(false);
     }
-  }, [connectionManager, onGameExit]);
+  }, [onGameExit]);
 
   // Game lifecycle listeners binding
   useEffect(() => {
@@ -107,14 +104,12 @@ export const GameProvider = ({ children, onGameExit }) => {
       });
 
       const unsubRoom = registerRoomEvents(connectionManager, {
-        onOpponentLeft: () => {
-          onGameExit();
-        },
-        onGameExit,
+        onOpponentLeft: onGameExit,
       });
 
       const unsubGame = registerGameEvents(connectionManager, {
         onMatchUpdate: (updatedMatch) => {
+          setMatch(updatedMatch);
 
           if (!updatedMatch.roundWinner) {
             setCountdown(null);

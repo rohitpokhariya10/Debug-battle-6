@@ -56,7 +56,7 @@ function gameReducer(state, action) {
       else if (roundWinner) newScores[roundWinner]++;
       const newRoundsPlayed = roundsPlayed + 1;
 
-      if (newRoundsPlayed >= 3 && (newScores.X >= 2 || newScores.O >= 2)) {
+      if (newScores.X >= 2 || newScores.O >= 2) {
         const matchWinner = newScores.X > newScores.O ? 'X' : 'O';
         return { ...state, scores: newScores, roundsPlayed: newRoundsPlayed, matchWinner };
       }

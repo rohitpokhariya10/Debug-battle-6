@@ -475,6 +475,7 @@ const GameHeader = () => {
   const handleLeaveGame = useCallback(async () => {
     try {
       await gameApi.leave();
+      ConnectionManager.setActiveRoom(null);
       dispatch(updateUser({ activity: 'idle' }));
       toast.success('Left match successfully');
     } catch (error) {

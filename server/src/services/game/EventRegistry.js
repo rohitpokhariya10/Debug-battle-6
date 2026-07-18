@@ -57,7 +57,7 @@ export const registerSocketEvents = (io) => {
       if (cleared) {
         console.log(`♻️ User ${userId} reconnected. Cleared abort timeout for match:${matchId}`);
         // Notify room that user has reconnected
-        StateSynchronizer.sendPlayerReconnected(matchId, userId);
+        StateSynchronizer.sendPlayerReconnected(matchId, userId, socket.id);
       }
 
     });
@@ -107,7 +107,7 @@ export const registerSocketEvents = (io) => {
 
       ConnectionManager.clearDisconnectTimeout(matchId);
       await GameManager.abortGame(matchId);
-      StateSynchronizer.sendOpponentLeft(matchId, 'Opponent has abandoned the match');
+      StateSynchronizer.sendOpponentLeft(matchId, 'Opponent has abandoned the match', socket.id);
     });
 
     // ─── 4. DISCONNECT (GRACE TIMEOUT) ───

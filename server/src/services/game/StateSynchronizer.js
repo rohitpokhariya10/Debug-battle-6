@@ -25,15 +25,19 @@ class StateSynchronizer {
     }
   }
 
-  sendPlayerReconnected(roomId, userId) {
+  sendPlayerReconnected(roomId, userId, excludedSocketId) {
     if (this.io) {
-      this.io.to(`match:${roomId}`).emit('player-reconnected', { userId });
+      let target = this.io.to(`match:${roomId}`);
+      if (excludedSocketId) target = target.except(excludedSocketId);
+      target.emit('player-reconnected', { userId });
     }
   }
 
-  sendOpponentLeft(roomId, message) {
+  sendOpponentLeft(roomId, message, excludedSocketId) {
     if (this.io) {
-      this.io.to(`match:${roomId}`).emit('opponent-left', { message });
+      let target = this.io.to(`match:${roomId}`);
+      if (excludedSocketId) target = target.except(excludedSocketId);
+      target.emit('opponent-left', { message });
     }
   }
 }
